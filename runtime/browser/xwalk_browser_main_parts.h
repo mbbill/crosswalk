@@ -10,6 +10,7 @@
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
 #include "googleurl/src/gurl.h"
+#include "xwalk/runtime/browser/xwalk_process_singleton.h"
 
 namespace xwalk {
 
@@ -35,6 +36,7 @@ class XWalkBrowserMainParts : public content::BrowserMainParts {
   virtual void PreMainMessageLoopRun() OVERRIDE;
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
+  virtual void PostDestroyThreads() OVERRIDE;
 
 #if defined(OS_ANDROID)
   void SetRuntimeContext(RuntimeContext* context);
@@ -78,6 +80,10 @@ class XWalkBrowserMainParts : public content::BrowserMainParts {
 
   // Remote debugger server.
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
+
+  // Allows different browser processes to communicate with each other.
+  ProcessSingleton::NotifyResult notify_result_;
+  scoped_ptr<ProcessSingleton> process_singleton_;
 
   DISALLOW_COPY_AND_ASSIGN(XWalkBrowserMainParts);
 };

@@ -66,7 +66,8 @@ XWalkBrowserMainParts::XWalkBrowserMainParts(
     : BrowserMainParts(),
       startup_url_(chrome::kAboutBlankURL),
       parameters_(parameters),
-      run_default_message_loop_(true) {
+      run_default_message_loop_(true),
+      notify_result_(ProcessSingleton::PROCESS_NONE) {
 }
 
 XWalkBrowserMainParts::~XWalkBrowserMainParts() {
@@ -121,11 +122,21 @@ void XWalkBrowserMainParts::PreEarlyInitialization() {
 #endif
 }
 
+bool ProcessSingletonNotificationCallback(
+    const CommandLine& command_line,
+    const base::FilePath& current_directory) {
+	LOG(WARNING)<<"ProcessSingletonNotificationCallback ";
+	return true;
+}
 int XWalkBrowserMainParts::PreCreateThreads() {
 #if defined(OS_ANDROID)
   DCHECK(runtime_context_);
   runtime_context_->InitializeBeforeThreadCreation();
+#else
+  process_singleton_.reset(new ProcessSingleton(
+      base::Bind(&ProcessSingletonNotificationCallback)));
 #endif
+
   return content::RESULT_CODE_NORMAL_EXIT;
 }
 
@@ -201,6 +212,7 @@ void XWalkBrowserMainParts::PreMainMessageLoopRun() {
               loopback_ip, port, std::string()));
     }
   }
+  notify_result_ = process_singleton_->NotifyOtherProcessOrCreate();
 
   NativeAppWindow::Initialize();
 
@@ -252,6 +264,19 @@ void XWalkBrowserMainParts::PostMainMessageLoopRun() {
   MessageLoopForUI::current()->Start();
 #else
   runtime_context_.reset();
+#endif
+
+  if (notify_result_ == ProcessSingleton::PROCESS_NONE)
+    process_singleton_->Cleanup();
+}
+
+void XWalkBrowserMainParts::PostDestroyThreads() {
+#if defined(OS_ANDROID)
+  // On Android, there is no quit/exit. So the browser's main message loop will
+  // not finish.
+  NOTREACHED();
+#else
+  process_singleton_.reset();
 #endif
 }
 
