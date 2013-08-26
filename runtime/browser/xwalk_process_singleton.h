@@ -98,7 +98,7 @@ class ProcessSingleton : public base::NonThreadSafe {
   // On Windows, Create() has to be called before this.
   NotifyResult NotifyOtherProcess();
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_LINUX)
   // Exposed for testing.  We use a timeout on Linux, and in tests we want
   // this timeout to be short.
   NotifyResult NotifyOtherProcessWithTimeout(const CommandLine& command_line,
@@ -107,10 +107,7 @@ class ProcessSingleton : public base::NonThreadSafe {
   NotifyResult NotifyOtherProcessWithTimeoutOrCreate(
       const CommandLine& command_line,
       int timeout_seconds);
-  void OverrideCurrentPidForTesting(base::ProcessId pid);
-  void OverrideKillCallbackForTesting(
-      const base::Callback<void(int)>& callback);
-#endif  // defined(OS_LINUX) || defined(OS_OPENBSD)
+#endif  // defined(OS_LINUX)
 
  private:
 #if !defined(OS_MACOSX)
@@ -131,7 +128,7 @@ class ProcessSingleton : public base::NonThreadSafe {
   HWND window_;  // The HWND_MESSAGE window.
   bool is_virtualized_;  // Stuck inside Microsoft Softricity VM environment.
   HANDLE lock_file_;
-#elif defined(OS_LINUX) || defined(OS_OPENBSD)
+#elif defined(OS_LINUX)
   // Return true if the given pid is one of our child processes.
   // Assumes that the current pid is the root of all pids of the current
   // instance.
@@ -139,7 +136,7 @@ class ProcessSingleton : public base::NonThreadSafe {
 
   // Extract the process's pid from a symbol link path and if it is on
   // the same host, kill the process, unlink the lock file and return true.
-  // If the process is part of the same chrome instance, unlink the lock file
+  // If the process is part of the same xwalk instance, unlink the lock file
   // and return true without killing it.
   // If the process is on a different host, return false.
   bool KillProcessByLockPath();
@@ -159,9 +156,6 @@ class ProcessSingleton : public base::NonThreadSafe {
 
   // Path in file system to the lock.
   base::FilePath lock_path_;
-
-  // Path in file system to the cookie file.
-  base::FilePath cookie_path_;
 
   // Temporary directory to hold the socket.
   base::ScopedTempDir socket_dir_;

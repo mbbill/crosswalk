@@ -2,41 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// On Linux, when the user tries to launch a second copy of chrome, we check
-// for a socket in the user's profile directory.  If the socket file is open we
-// send a message to the first chrome browser process with the current
-// directory and second process command line flags.  The second process then
-// exits.
-//
-// Because many networked filesystem implementations do not support unix domain
-// sockets, we create the socket in a temporary directory and create a symlink
-// in the profile. This temporary directory is no longer bound to the profile,
-// and may disappear across a reboot or login to a separate session. To bind
-// them, we store a unique cookie in the profile directory, which must also be
-// present in the remote directory to connect. The cookie is checked both before
-// and after the connection. /tmp is sticky, and different Chrome sessions use
-// different cookies. Thus, a matching cookie before and after means the
-// connection was to a directory with a valid cookie.
-//
-// We also have a lock file, which is a symlink to a non-existent destination.
-// The destination is a string containing the hostname and process id of
-// chrome's browser process, eg. "SingletonLock -> example.com-9156".  When the
-// first copy of chrome exits it will delete the lock file on shutdown, so that
-// a different instance on a different host may then use the profile directory.
-//
-// If writing to the socket fails, the hostname in the lock is checked to see if
-// another instance is running a different host using a shared filesystem (nfs,
-// etc.) If the hostname differs an error is displayed and the second process
-// exits.  Otherwise the first process (if any) is killed and the second process
-// starts as normal.
-//
-// When the second process sends the current directory and command line flags to
-// the first process, it waits for an ACK message back from the first process
-// for a certain time. If there is no ACK message back in time, then the first
-// process will be considered as hung for some reason. The second process then
-// retrieves the process id from the symbol link and kills it by sending
-// SIGKILL. Then the second process starts as normal.
-
 #include "xwalk/runtime/browser/xwalk_process_singleton.h"
 
 #include <errno.h>
@@ -78,10 +43,7 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
-//#include "chrome/common/chrome_constants.h"
 #include "content/public/browser/browser_thread.h"
-//#include "grit/chromium_strings.h"
-//#include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -91,7 +53,6 @@ const int ProcessSingleton::kTimeoutInSeconds;
 
 namespace {
 
-static bool g_disable_prompt;
 const char kStartToken[] = "START";
 const char kACKToken[] = "ACK";
 const char kShutdownToken[] = "SHUTDOWN";
@@ -299,10 +260,8 @@ void DisplayProfileInUseError(const std::string& lock_path,
 }
 
 bool IsChromeProcess(pid_t pid) {
-  base::FilePath other_chrome_path(base::GetProcessExecutablePath(pid));
-  return (!other_chrome_path.empty());/* &&
-          other_chrome_path.BaseName() ==
-          base::FilePath(chrome::kBrowserProcessExecutableName));*/
+  base::FilePath other_xwalk_path(base::GetProcessExecutablePath(pid));
+  return (!other_xwalk_path.empty());
 }
 
 // A helper class to hold onto a socket.
@@ -324,29 +283,10 @@ class ScopedSocket {
   int fd_;
 };
 
-// Returns a random string for uniquifying profile connections.
-std::string GenerateCookie() {
-  return base::Uint64ToString(base::RandUint64());
-}
-
-bool CheckCookie(const base::FilePath& path, const base::FilePath& cookie) {
-  return (cookie == ReadLink(path));
-}
-
 bool ConnectSocket(ScopedSocket* socket,
-                   const base::FilePath& socket_path,
-                   const base::FilePath& cookie_path) {
+                   const base::FilePath& socket_path) {
   base::FilePath socket_target;
   if (file_util::ReadSymbolicLink(socket_path, &socket_target)) {
-    // It's a symlink. Read the cookie.
-    base::FilePath cookie = ReadLink(cookie_path);
-    if (cookie.empty())
-      return false;
-    base::FilePath remote_cookie = socket_target.DirName().
-                             Append(FILE_PATH_LITERAL("SingletonCookie"));
-    // Verify the cookie before connecting.
-    if (!CheckCookie(remote_cookie, cookie))
-      return false;
     // Now we know the directory was (at that point) created by the profile
     // owner. Try to connect.
     sockaddr_un addr;
@@ -356,13 +296,6 @@ bool ConnectSocket(ScopedSocket* socket,
                                    sizeof(addr)));
     if (ret != 0)
       return false;
-    // Check the cookie again. We only link in /tmp, which is sticky, so, if the
-    // directory is still correct, it must have been correct in-between when we
-    // connected. POSIX, sadly, lacks a connectat().
-    if (!CheckCookie(remote_cookie, cookie)) {
-      socket->Reset();
-      return false;
-    }
     // Success!
     return true;
   } else if (errno == EINVAL) {
@@ -675,7 +608,6 @@ ProcessSingleton::ProcessSingleton(
   file_util::GetTempDir(&tmp_dir);
   socket_path_ = tmp_dir.Append(FILE_PATH_LITERAL("SingletonSocket"));
   lock_path_ = tmp_dir.Append(FILE_PATH_LITERAL("SingletonLock"));
-  cookie_path_ = tmp_dir.Append(FILE_PATH_LITERAL("SingletonCookie"));
 
   kill_callback_ = base::Bind(&ProcessSingleton::KillProcess,
                               base::Unretained(this));
@@ -699,13 +631,13 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
   ScopedSocket socket;
   for (int retries = 0; retries <= timeout_seconds; ++retries) {
     // Try to connect to the socket.
-    if (ConnectSocket(&socket, socket_path_, cookie_path_))
+    if (ConnectSocket(&socket, socket_path_))
       break;
 
     // If we're in a race with another process, they may be in Create() and have
     // created the lock but not attached to the socket.  So we check if the
     // process with the pid from the lockfile is currently running and is a
-    // chrome browser.  If so, we loop and try again for |timeout_seconds|.
+    // xwalk browser.  If so, we loop and try again for |timeout_seconds|.
 
     std::string hostname;
     int pid;
@@ -727,20 +659,20 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
     }
 
     if (!IsChromeProcess(pid)) {
-      // Orphaned lockfile (no process with pid, or non-chrome process.)
+      // Orphaned lockfile (no process with pid, or non-xwalk process.)
       UnlinkPath(lock_path_);
       return PROCESS_NONE;
     }
 
     if (IsSameChromeInstance(pid)) {
-      // Orphaned lockfile (pid is part of same chrome instance we are, even
+      // Orphaned lockfile (pid is part of same xwalk instance we are, even
       // though we haven't tried to create a lockfile yet).
       UnlinkPath(lock_path_);
       return PROCESS_NONE;
     }
 
     if (retries == timeout_seconds) {
-      // Retries failed.  Kill the unresponsive chrome process and continue.
+      // Retries failed.  Kill the unresponsive xwalk process and continue.
       if (!kill_unresponsive || !KillProcessByLockPath())
         return PROFILE_IN_USE;
       return PROCESS_NONE;
@@ -839,19 +771,6 @@ ProcessSingleton::NotifyOtherProcessWithTimeoutOrCreate(
   return LOCK_ERROR;
 }
 
-void ProcessSingleton::OverrideCurrentPidForTesting(base::ProcessId pid) {
-  current_pid_ = pid;
-}
-
-void ProcessSingleton::OverrideKillCallbackForTesting(
-    const base::Callback<void(int)>& callback) {
-  kill_callback_ = callback;
-}
-
-void ProcessSingleton::DisablePromptForTesting() {
-  g_disable_prompt = true;
-}
-
 bool ProcessSingleton::Create() {
   int sock;
   sockaddr_un addr;
@@ -871,35 +790,8 @@ bool ProcessSingleton::Create() {
       // startup race.
       return false;
   }
-/*
-  // Create the socket file somewhere in /tmp which is usually mounted as a
-  // normal filesystem. Some network filesystems (notably AFS) are screwy and
-  // do not support Unix domain sockets.
-  if (!socket_dir_.CreateUniqueTempDir()) {
-    LOG(ERROR) << "Failed to create socket directory.";
-    return false;
-  }
-  // Setup the socket symlink and the two cookies.
-  base::FilePath socket_target_path =
-      socket_dir_.path().Append(FILE_PATH_LITERAL("SingletonSocket"));
-  base::FilePath cookie(GenerateCookie());
-  base::FilePath remote_cookie_path =
-      socket_dir_.path().Append(FILE_PATH_LITERAL("SingletonCookie"));
+
   UnlinkPath(socket_path_);
-  UnlinkPath(cookie_path_);
-  if (!SymlinkPath(socket_target_path, socket_path_) ||
-      !SymlinkPath(cookie, cookie_path_) ||
-      !SymlinkPath(cookie, remote_cookie_path)) {
-    // We've already locked things, so we can't have lost the startup race,
-    // but something doesn't like us.
-    LOG(ERROR) << "Failed to create symlinks.";
-    if (!socket_dir_.Delete())
-      LOG(ERROR) << "Encountered a problem when deleting socket directory.";
-    return false;
-  }
-*/
-  UnlinkPath(socket_path_);
-  UnlinkPath(cookie_path_);
   SetupSocket(socket_path_.value(), &sock, &addr);
 
   if (bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
@@ -924,7 +816,6 @@ bool ProcessSingleton::Create() {
 
 void ProcessSingleton::Cleanup() {
   UnlinkPath(socket_path_);
-  UnlinkPath(cookie_path_);
   UnlinkPath(lock_path_);
 }
 

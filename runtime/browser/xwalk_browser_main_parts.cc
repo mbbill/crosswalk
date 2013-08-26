@@ -61,6 +61,39 @@ namespace xwalk {
 
 using extensions::XWalkExternalExtension;
 
+static bool GetStartUpURL(const CommandLine* command_line, GURL* url_out) {
+  const CommandLine::StringVector& args = command_line->GetArgs();
+
+  if (args.empty())
+    return false;
+
+  GURL url(args[0]);
+  if (url.is_valid() && url.has_scheme()) {
+    *url_out = url;
+  } else {
+    base::FilePath path(args[0]);
+    if (!path.IsAbsolute())
+      path = MakeAbsoluteFilePath(path);
+    *url_out = net::FilePathToFileURL(path);
+  }
+  return true;
+}
+// TODO (Bai): A better approach is needed here to get runtime context
+//             from global scope.
+static RuntimeContext* callback_runtime_context_ = NULL;
+static bool ProcessSingletonNotificationCallback(
+    const CommandLine& command_line,
+    const base::FilePath& current_directory) {
+
+  GURL startup_url;
+  if (GetStartUpURL(&command_line, &startup_url) == false)
+    return false;
+
+  if (callback_runtime_context_ != NULL)
+    Runtime::Create(callback_runtime_context_, startup_url);
+  return true;
+}
+
 XWalkBrowserMainParts::XWalkBrowserMainParts(
     const content::MainFunctionParams& parameters)
     : BrowserMainParts(),
@@ -81,21 +114,7 @@ void XWalkBrowserMainParts::SetRuntimeContext(RuntimeContext* context) {
 
 void XWalkBrowserMainParts::PreMainMessageLoopStart() {
 #if !defined(OS_ANDROID)
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  const CommandLine::StringVector& args = command_line->GetArgs();
-
-  if (args.empty())
-    return;
-
-  GURL url(args[0]);
-  if (url.is_valid() && url.has_scheme()) {
-    startup_url_ = url;
-  } else {
-    base::FilePath path(args[0]);
-    if (!path.IsAbsolute())
-      path = MakeAbsoluteFilePath(path);
-    startup_url_ = net::FilePathToFileURL(path);
-  }
+  GetStartUpURL(CommandLine::ForCurrentProcess(),&startup_url_);
 #endif
 
 #if defined(OS_MACOSX)
@@ -122,12 +141,6 @@ void XWalkBrowserMainParts::PreEarlyInitialization() {
 #endif
 }
 
-bool ProcessSingletonNotificationCallback(
-    const CommandLine& command_line,
-    const base::FilePath& current_directory) {
-	LOG(WARNING)<<"ProcessSingletonNotificationCallback ";
-	return true;
-}
 int XWalkBrowserMainParts::PreCreateThreads() {
 #if defined(OS_ANDROID)
   DCHECK(runtime_context_);
@@ -193,6 +206,7 @@ void XWalkBrowserMainParts::PreMainMessageLoopRun() {
   runtime_context_->PreMainMessageLoopRun();
 #else
   runtime_context_.reset(new RuntimeContext);
+  callback_runtime_context_ = runtime_context_.get();
   runtime_registry_.reset(new RuntimeRegistry);
   extension_service_.reset(
       new extensions::XWalkExtensionService(runtime_registry_.get()));
@@ -212,7 +226,18 @@ void XWalkBrowserMainParts::PreMainMessageLoopRun() {
               loopback_ip, port, std::string()));
     }
   }
+
   notify_result_ = process_singleton_->NotifyOtherProcessOrCreate();
+  if (notify_result_ != ProcessSingleton::PROCESS_NONE) {
+    if (notify_result_ == ProcessSingleton::PROCESS_NOTIFIED) {
+	  LOG(WARNING)<<"Created new window in existing crosswalk session.";
+	} else {
+      LOG(ERROR)<<"Failed to create a ProcessSingleton. Aborting. "
+                  "Error code:"<< notify_result_;
+	}
+    // return when target is notified or any error occured.
+    return;
+  }
 
   NativeAppWindow::Initialize();
 
@@ -256,6 +281,10 @@ void XWalkBrowserMainParts::PreMainMessageLoopRun() {
 }
 
 bool XWalkBrowserMainParts::MainMessageLoopRun(int* result_code) {
+  if (notify_result_ != ProcessSingleton::PROCESS_NONE) {
+    // If notify failed, don't run default message loop and exit.
+    return true;
+  }
   return !run_default_message_loop_;
 }
 
