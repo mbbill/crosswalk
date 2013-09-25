@@ -155,12 +155,11 @@ XWalkBrowserMainParts::XWalkBrowserMainParts(
     : BrowserMainParts(),
       startup_url_(content::kAboutBlankURL),
       parameters_(parameters),
-      run_default_message_loop_(true),
-#if defined(OS_LINUX)
-      notify_result_(ProcessSingleton::PROCESS_NONE)
-#endif
-    {
+      run_default_message_loop_(true) {
   g_current_browser_main_parts = this;
+#if defined(OS_LINUX)
+  notify_result_ = ProcessSingleton::PROCESS_NONE;
+#endif
 }
 
 XWalkBrowserMainParts::~XWalkBrowserMainParts() {
