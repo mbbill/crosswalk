@@ -417,7 +417,6 @@ void XWalkBrowserMainParts::PostMainMessageLoopRun() {
     process_singleton_->Cleanup();
 #endif
 #endif
-
 }
 
 void XWalkBrowserMainParts::PostDestroyThreads() {
