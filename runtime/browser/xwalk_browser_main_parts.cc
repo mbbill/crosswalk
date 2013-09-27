@@ -95,9 +95,8 @@ static bool ProcessSingletonNotificationCallback(
     const base::FilePath& current_directory) {
 
   XWalkBrowserMainParts* parts = XWalkBrowserMainParts::GetInstance();
-  if (parts != NULL) {
-    parts->ProcessCommandLine(&command_line);
-  }
+  DCHECK(parts);
+  parts->ProcessCommandLine(&command_line);
   return true;
 }
 #endif
@@ -398,12 +397,6 @@ void XWalkBrowserMainParts::PreMainMessageLoopRun() {
 }
 
 bool XWalkBrowserMainParts::MainMessageLoopRun(int* result_code) {
-#if defined(OS_LINUX)
-  if (notify_result_ != ProcessSingleton::PROCESS_NONE) {
-    // If notify failed, don't run default message loop and exit.
-    return true;
-  }
-#endif
   return !run_default_message_loop_;
 }
 
