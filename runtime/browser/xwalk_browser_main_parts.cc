@@ -152,7 +152,6 @@ XWalkBrowserMainParts* XWalkBrowserMainParts::GetInstance() {
 XWalkBrowserMainParts::XWalkBrowserMainParts(
     const content::MainFunctionParams& parameters)
     : BrowserMainParts(),
-      startup_url_(content::kAboutBlankURL),
       parameters_(parameters),
       run_default_message_loop_(true) {
   g_current_browser_main_parts = this;
@@ -173,10 +172,6 @@ void XWalkBrowserMainParts::SetRuntimeContext(RuntimeContext* context) {
 
 void XWalkBrowserMainParts::PreMainMessageLoopStart() {
   SetXWalkCommandLineFlags();
-
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  startup_url_ = GetURLFromCommandLine(*command_line);
-
 #if defined(OS_MACOSX)
   PreMainMessageLoopStartMac();
 #endif
@@ -230,14 +225,6 @@ void XWalkBrowserMainParts::RegisterExternalExtensions() {
   if (!cmd_line->HasSwitch(switches::kXWalkExternalExtensionsPath))
     return;
 
-  if (!cmd_line->HasSwitch(
-          switches::kXWalkAllowExternalExtensionsForRemoteSources) &&
-      !startup_url_.SchemeIsFile()) {
-    VLOG(0) << "Unsupported scheme for external extensions: " <<
-          startup_url_.scheme();
-    return;
-  }
-
   base::FilePath extensions_dir =
       cmd_line->GetSwitchValuePath(switches::kXWalkExternalExtensionsPath);
   if (!file_util::DirectoryExists(extensions_dir)) {
@@ -256,6 +243,7 @@ void XWalkBrowserMainParts::RegisterExternalExtensions() {
 void XWalkBrowserMainParts::ProcessCommandLine(
         const CommandLine* command_line) {
 #if !defined(OS_ANDROID)
+  GURL startup_url;
   if (command_line == NULL)
     return;
   if (command_line->HasSwitch(switches::kRemoteDebuggingPort)) {
@@ -272,12 +260,13 @@ void XWalkBrowserMainParts::ProcessCommandLine(
   std::string command_name =
       command_line->GetProgram().BaseName().MaybeAsASCII();
 
+  startup_url = GetURLFromCommandLine(*command_line);
 #if defined(OS_TIZEN_MOBILE)
   // On Tizen, applications are launched by a symbolic link
   // named like the application ID.
-  if (startup_url_.SchemeIsFile() || command_name.compare("xwalk") != 0) {
+  if (startup_url.SchemeIsFile() || command_name.compare("xwalk") != 0) {
 #else
-  if (startup_url_.SchemeIsFile()) {
+  if (startup_url.SchemeIsFile()) {
 #endif  // OS_TIZEN_MOBILE
     xwalk::application::ApplicationSystem* system =
         runtime_context_->GetApplicationSystem();
@@ -313,7 +302,7 @@ void XWalkBrowserMainParts::ProcessCommandLine(
       return;
     }
     base::FilePath path;
-    if (!net::FileURLToFilePath(startup_url_, &path))
+    if (!net::FileURLToFilePath(startup_url, &path))
       return;
     if (command_line->HasSwitch(switches::kInstall)) {
       if (file_util::PathExists(path)) {
@@ -338,7 +327,7 @@ void XWalkBrowserMainParts::ProcessCommandLine(
   }
 
   // The new created Runtime instance will be managed by RuntimeRegistry.
-  Runtime::CreateWithDefaultWindow(runtime_context_.get(), startup_url_);
+  Runtime::CreateWithDefaultWindow(runtime_context_.get(), startup_url);
 
   // If the |ui_task| is specified in main function parameter, it indicates
   // that we will run this UI task instead of running the the default main
@@ -381,9 +370,9 @@ void XWalkBrowserMainParts::PreMainMessageLoopRun() {
   notify_result_ = process_singleton_->NotifyOtherProcessOrCreate();
   if (notify_result_ != ProcessSingleton::PROCESS_NONE) {
     if (notify_result_ == ProcessSingleton::PROCESS_NOTIFIED) {
-      LOG(WARNING) << "Created new window in existing crosswalk session.";
+      LOG(WARNING) << "Successfully notified runtime process.";
     } else {
-      LOG(ERROR) <<" Failed to create a ProcessSingleton. Aborting. "
+      LOG(ERROR) << "Failed to create a ProcessSingleton. Aborting."
                   "Error code:"<< notify_result_;
     }
     // return when target is notified or any error occured.

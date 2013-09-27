@@ -83,9 +83,6 @@ class XWalkBrowserMainParts : public content::BrowserMainParts {
 
   scoped_ptr<extensions::XWalkExtensionService> extension_service_;
 
-  // Should be about:blank If no URL is specified in command line arguments.
-  GURL startup_url_;
-
   // The main function parameters passed to BrowserMain.
   const content::MainFunctionParams& parameters_;
 
