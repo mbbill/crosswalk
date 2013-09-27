@@ -59,9 +59,9 @@ base::StringPiece PlatformResourceProvider(int key) {
   return base::StringPiece();
 }
 
+#if !defined(OS_ANDROID)
 // FIXME: Compare with method in startup_browser_creator.cc.
 static GURL GetURLFromCommandLine(const CommandLine& command_line) {
-#if !defined(OS_ANDROID)
   const CommandLine::StringVector& args = command_line.GetArgs();
 
   if (args.empty())
@@ -76,9 +76,8 @@ static GURL GetURLFromCommandLine(const CommandLine& command_line) {
       path = MakeAbsoluteFilePath(path);
     return url = net::FilePathToFileURL(path);
   }
-#endif
-  return GURL();
 }
+#endif
 
 }  // namespace
 
