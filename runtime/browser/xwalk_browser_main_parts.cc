@@ -227,7 +227,7 @@ void XWalkBrowserMainParts::RegisterExternalExtensions() {
   base::FilePath extensions_dir =
       cmd_line->GetSwitchValuePath(switches::kXWalkExternalExtensionsPath);
   if (!file_util::DirectoryExists(extensions_dir)) {
-    LOG(WARNING) << "Ignoring non-existent extension directory: "
+    LOG(INFO) << "Ignoring non-existent extension directory: "
                  << extensions_dir.AsUTF8Unsafe();
     return;
   }
