@@ -89,7 +89,7 @@ const char kEnableViewport[] = "enable-viewport";
 
 namespace xwalk {
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) && !defined(OS_ANDROID)
 static bool ProcessSingletonNotificationCallback(
     const CommandLine& command_line,
     const base::FilePath& current_directory) {
@@ -157,7 +157,7 @@ XWalkBrowserMainParts::XWalkBrowserMainParts(
       parameters_(parameters),
       run_default_message_loop_(true) {
   g_current_browser_main_parts = this;
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) && !defined(OS_ANDROID)
   notify_result_ = ProcessSingleton::PROCESS_NONE;
 #endif
 }
@@ -256,6 +256,7 @@ void XWalkBrowserMainParts::RegisterExternalExtensions() {
 // the application being uninstalled is running.
 void XWalkBrowserMainParts::ProcessCommandLine(
         const CommandLine* command_line) {
+#if !defined(OS_ANDROID)
   if (command_line == NULL)
     return;
   if (command_line->HasSwitch(switches::kRemoteDebuggingPort)) {
@@ -349,6 +350,7 @@ void XWalkBrowserMainParts::ProcessCommandLine(
     delete parameters_.ui_task;
     run_default_message_loop_ = false;
   }
+#endif
 }
 
 void XWalkBrowserMainParts::PreMainMessageLoopRun() {
@@ -410,12 +412,12 @@ void XWalkBrowserMainParts::PostMainMessageLoopRun() {
   base::MessageLoopForUI::current()->Start();
 #else
   runtime_context_.reset();
-#endif
-
 #if defined(OS_LINUX)
   if (notify_result_ == ProcessSingleton::PROCESS_NONE)
     process_singleton_->Cleanup();
 #endif
+#endif
+
 }
 
 void XWalkBrowserMainParts::PostDestroyThreads() {
