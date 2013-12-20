@@ -22,6 +22,7 @@
 #include "base/threading/thread_checker.h"
 #include "xwalk/application/common/manifest.h"
 #include "xwalk/application/common/install_warning.h"
+#include "xwalk/application/common/permission_types.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -120,6 +121,11 @@ class ApplicationData : public base::RefCountedThreadSafe<ApplicationData> {
   bool IsPlatformApp() const;
   bool IsHostedApp() const;
 
+  // Permission related
+  StoredPermission GetPermission(std::string permission_name);
+  bool SetPermission(const std::string& permission_name,
+                     const StoredPermission& perm);
+
   bool HasMainDocument() const;
 
  private:
@@ -202,6 +208,9 @@ class ApplicationData : public base::RefCountedThreadSafe<ApplicationData> {
   // initialization happens from the same thread (this can happen when certain
   // parts of the initialization process need information from previous parts).
   base::ThreadChecker thread_checker_;
+
+  // Application's persistent permissions.
+  StoredPermissionMap permission_map_;
 
 #if defined(OS_TIZEN_MOBILE)
   scoped_ptr<tizen::AppcoreContext> appcore_context_;

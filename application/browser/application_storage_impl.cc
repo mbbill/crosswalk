@@ -59,6 +59,48 @@ bool InitEventsTable(sql::Connection* db) {
   return transaction.Commit();
 }
 
+// Permissions are stored like "bluetooth:ALLOW;calendar:DENY;contacts:ALLOW"
+std::string PermissionMapToStr(StoredPermissionMap permissions) {
+  std::string str;
+  StoredPermissionMap::iterator iter;
+  for (iter = permissions.begin(); iter != permissions.end(); ++iter) {
+    if (!str.empty())
+      str += ";";
+    str += (iter->first + ":" + StoredPermToString(iter->second));
+  }
+  return str;
+}
+
+StoredPermissionMap StrToPermissionMap(const std::string& str) {
+  StoredPermissionMap map;
+  std::vector<std::string> vec;
+  base::SplitString(str, ';', &vec);
+  if (!vec.empty()) {
+    for (std::vector<std::string>::iterator iter = vec.begin();
+        iter != vec.end(); ++iter) {
+      std::vector<std::string> perm_item;
+      base::SplitString(*iter, ':', &perm_item);
+      if (perm_item.size() != 2) {
+        LOG(ERROR) << "Permission format error! Corrupted database?";
+        map.clear();
+        break;
+      }
+      map[perm_item[0]] = StringToStoredPerm(perm_item[1]);
+    }
+  }
+  return map;
+}
+
+bool InitPermissionsTable(sql::Connection* db) {
+  sql::Transaction transaction(db);
+  transaction.Begin();
+  if (!db->DoesTableExist(db_fields::kPermissionTableName)) {
+    if (!db->Execute(db_fields::kCreatePermissionTableOp))
+     return false;
+  }
+  return transaction.Commit();
+}
+
 bool Insert(scoped_refptr<ApplicationData> application,
             ApplicationData::ApplicationDataMap& applications) {
   return applications.insert(
@@ -149,6 +191,11 @@ bool ApplicationStorageImpl::Init(
     return false;
   }
 
+  if (!InitPermissionsTable(sqlite_db.get())) {
+    LOG(ERROR) << "Unable to open registered permissions table.";
+    return false;
+  }
+
   if (!sqlite_db->Execute("PRAGMA foreign_keys=ON")) {
     LOG(ERROR) << "Unable to enforce foreign key contraints.";
     return false;
@@ -233,6 +280,8 @@ bool ApplicationStorageImpl::GetInstalledApplications(
           std::set<std::string>(events.begin(), events.end());
     }
 
+    application->permission_map_ = StrToPermissionMap(smt.ColumnString(5));
+
     if (!Insert(application, applications)) {
       LOG(ERROR) << "An error occurred while"
                     "initializing the application cache data.";
@@ -252,7 +301,8 @@ bool ApplicationStorageImpl::AddApplication(const ApplicationData* application,
 
   return (SetApplicationValue(
       application, install_time, db_fields::kSetApplicationWithBindOp) &&
-          SetEvents(application->ID(), application->GetEvents()));
+          SetEvents(application->ID(), application->GetEvents()) &&
+          SetPermissions(application->ID(), application->permission_map_));
 }
 
 bool ApplicationStorageImpl::UpdateApplication(
@@ -264,7 +314,8 @@ bool ApplicationStorageImpl::UpdateApplication(
 
   if (SetApplicationValue(
           application, install_time, db_fields::kUpdateApplicationWithBindOp) &&
-      UpdateEvents(application->ID(), application->GetEvents())) {
+      UpdateEvents(application->ID(), application->GetEvents()) &&
+      UpdatePermissions(application->ID(), application->permission_map_)) {
     application->is_dirty_ = false;
     return true;
   }
@@ -384,6 +435,67 @@ bool ApplicationStorageImpl::SetEventsValue(
   smt.BindString(1, id);
   if (!smt.Run()) {
     LOG(ERROR) << "An error occured when inserting event information into DB.";
+    return false;
+  }
+
+  return transaction.Commit();
+}
+
+bool ApplicationStorageImpl::SetPermissions(const std::string& id,
+                      const StoredPermissionMap& permissions) {
+  if (!db_initialized_)
+    return false;
+  return SetPermissionsValue(id, permissions,
+                             db_fields::kInsertPermissionsWithBindOp);
+}
+
+bool ApplicationStorageImpl::UpdatePermissions(const std::string& id,
+                       const StoredPermissionMap& permissions) {
+  if (!db_initialized_)
+    return false;
+
+  if (permissions.empty())
+    return DeletePermissions(id);
+
+  return SetPermissionsValue(id, permissions,
+                             db_fields::kUpdatePermissionsWithBindOp);
+}
+
+bool ApplicationStorageImpl::DeletePermissions(const std::string& id) {
+  sql::Transaction transaction(sqlite_db_.get());
+  if (!transaction.Begin())
+    return false;
+
+  sql::Statement smt(sqlite_db_->GetUniqueStatement(
+      db_fields::kDeletePermissionsWithBindOp));
+  smt.BindString(0, id);
+
+  if (!smt.Run()) {
+    LOG(ERROR) <<
+        "An error occured when deleting permission information from DB.";
+    return false;
+  }
+
+  return transaction.Commit();
+}
+
+bool ApplicationStorageImpl::SetPermissionsValue(
+    const std::string& id,
+    const StoredPermissionMap& permissions,
+    const std::string& operation) {
+  sql::Transaction transaction(sqlite_db_.get());
+  std::string permission_str = PermissionMapToStr(permissions);
+
+  if (!transaction.Begin())
+    return false;
+
+  sql::Statement smt(sqlite_db_->GetUniqueStatement(
+      operation.c_str()));
+  smt.BindString(0, permission_str);
+  smt.BindString(1, id);
+  if (!smt.Run()) {
+    LOG(ERROR) <<
+        "An error occured when inserting permission information into DB.";
     return false;
   }
 
