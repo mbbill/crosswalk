@@ -246,6 +246,11 @@ bool ApplicationService::Install(const base::FilePath& path, std::string* id) {
     return false;
   }
 
+  if (!permission_policy_manager_->InitApplicationPermission(application_data.get())) {
+    LOG(ERROR) << "Application permission data is invalid";
+    return false;
+  }
+
   if (!application_storage_->AddApplication(application_data)) {
     LOG(ERROR) << "Application with id " << application_data->ID()
                << " couldn't be installed.";
