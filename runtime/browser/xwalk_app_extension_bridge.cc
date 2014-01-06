@@ -36,5 +36,19 @@ void XWalkAppExtensionBridge::CheckAPIAccessControl(std::string extension_name,
   }
 }
 
+bool XWalkAppExtensionBridge::RegisterPermissions(std::string extension_name,
+    std::string perm_table) {
+  xwalk::application::ApplicationService* service =
+        app_system_->application_service();
+  xwalk::application::Application* running_app =
+        service->GetActiveApplication();
+  if (running_app) {
+    std::string app_id = running_app->id();
+    return service->RegisterPermissions(app_id, extension_name, perm_table);
+  } else {
+    return false;
+  }
+}
+
 }  // namespace xwalk
 
